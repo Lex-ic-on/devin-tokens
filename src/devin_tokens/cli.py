@@ -116,7 +116,8 @@ def print_session_detail(s: dict) -> None:
         print("  (per-step token data not available — requires a newer version of Devin CLI)")
         print()
 
-    print(f"  TOTAL  in(+cache)={s['input']:>12,}  output={s['output']:>10,}  cached={s['cached']:>12,}")
+    net_input = s["input"] - s["cached"]
+    print(f"  TOTAL  input={net_input:>12,}  output={s['output']:>10,}  cached={s['cached']:>12,}")
     print()
 
 
@@ -129,13 +130,13 @@ def print_daily_table(sessions: list[dict]) -> None:
 
     col_w = 10  # token column width
     print()
-    print(f"  {'date':<12}  {'sessions':>8}  {'in(+cache)':>{col_w}}  {'output':>8}  {'cached':>{col_w}}")
+    print(f"  {'date':<12}  {'sessions':>8}  {'input':>{col_w}}  {'output':>8}  {'cached':>{col_w}}")
     print("  " + "-" * 60)
 
     grand_input = grand_output = grand_cached = 0
     for day in sorted(by_date):
         day_sessions = by_date[day]
-        day_input = sum(s["input"] for s in day_sessions)
+        day_input = sum(s["input"] - s["cached"] for s in day_sessions)
         day_output = sum(s["output"] for s in day_sessions)
         day_cached = sum(s["cached"] for s in day_sessions)
         grand_input += day_input
@@ -224,19 +225,20 @@ def main() -> None:
     # List mode: one row per session
     if args.list:
         print()
-        print(f"  {'session':<22}  {'start':<17}  {'in(+cache)':>10}  {'output':>8}  {'cached':>10}  title")
+        print(f"  {'session':<22}  {'start':<17}  {'input':>10}  {'output':>8}  {'cached':>10}  title")
         print("  " + "-" * 100)
         for s in sorted(filtered, key=lambda x: x["start"]):
             has_detail = " *" if s["has_step_detail"] else "  "
             title = s["title"][:30]
-            print(f"  {s['session_id']:<22}{has_detail} {fmt_date(s['start']):<17}  {s['input']:>10,}  {s['output']:>8,}  {s['cached']:>10,}  {title}")
+            net_input = s["input"] - s["cached"]
+            print(f"  {s['session_id']:<22}{has_detail} {fmt_date(s['start']):<17}  {net_input:>10,}  {s['output']:>8,}  {s['cached']:>10,}  {title}")
         print()
         print("  (* = per-step token data available)")
         print()
-        total_input = sum(s["input"] for s in filtered)
+        total_input = sum(s["input"] - s["cached"] for s in filtered)
         total_output = sum(s["output"] for s in filtered)
         total_cached = sum(s["cached"] for s in filtered)
-        print(f"  {len(filtered)} sessions  |  in(+cache): {total_input:,}  output: {total_output:,}  cached: {total_cached:,}")
+        print(f"  {len(filtered)} sessions  |  input: {total_input:,}  output: {total_output:,}  cached: {total_cached:,}")
         print()
         return
 
