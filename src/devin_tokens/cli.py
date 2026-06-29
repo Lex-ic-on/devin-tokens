@@ -137,9 +137,11 @@ def _fmt_cached(n: int, is_acp: bool) -> str:
 def print_daily_table(sessions: list[dict]) -> None:
     """Group sessions by date and source, print a ccusage-style daily table.
 
-    Each day is split into two rows: ``direct`` (normal CLI sessions) and
-    ``ACP`` (Hermes-via-ACP sessions).  ACP rows show ``---`` for cached
-    tokens because the ACP protocol does not report cache counts.
+    Each day always shows two rows: ``direct`` (normal CLI sessions) and
+    ``ACP`` (Hermes-via-ACP sessions).  The date is only printed on the
+    ``direct`` row; the ``ACP`` row leaves it blank so the visual grouping
+    is clear.  ACP rows show ``---`` for cached tokens because the ACP
+    protocol does not report cache counts.
     """
     # Group by (date, source) where source is "direct" or "ACP".
     by_group: dict[tuple[str, str], list] = defaultdict(list)
@@ -155,14 +157,13 @@ def print_daily_table(sessions: list[dict]) -> None:
 
     grand_input = grand_output = grand_cached = 0
     grand_has_acp = False
-    for day in sorted({d for d, _ in by_group}):
+    all_days = sorted({d for d, _ in by_group})
+    for day in all_days:
         for src in ("direct", "ACP"):
             key = (day, src)
-            if key not in by_group:
-                continue
-            group_sessions = by_group[key]
+            group_sessions = by_group.get(key, [])
             is_acp = src == "ACP"
-            if is_acp:
+            if is_acp and group_sessions:
                 grand_has_acp = True
             day_input = sum(s["input"] - s["cached"] for s in group_sessions)
             day_output = sum(s["output"] for s in group_sessions)
@@ -174,7 +175,9 @@ def print_daily_table(sessions: list[dict]) -> None:
                 grand_cached += day_cached
             cached_str = _fmt_cached(day_cached, is_acp)
             session_ids = ", ".join(s["session_id"] for s in group_sessions)
-            print(f"  {day:<12}  {src:<6}  {len(group_sessions):>8}  {day_input:>{col_w},}  {day_output:>8,}  {cached_str}  {session_ids}")
+            # Show date only on the first (direct) row; blank on ACP row.
+            date_label = day if not is_acp else ""
+            print(f"  {date_label:<12}  {src:<6}  {len(group_sessions):>8}  {day_input:>{col_w},}  {day_output:>8,}  {cached_str}  {session_ids}")
 
     print("  " + "-" * 70)
     total_sessions = len(sessions)
