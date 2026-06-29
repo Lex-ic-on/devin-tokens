@@ -165,14 +165,11 @@ def print_daily_table(steps: list[dict]) -> None:
 
     grand_input = grand_output = grand_cached = 0
     grand_sessions: set[str] = set()
-    grand_has_acp = False
     all_days = sorted({d for d, _ in by_group})
     for day in all_days:
         for src in ("direct", "ACP"):
             group_steps = by_group.get((day, src), [])
             is_acp = src == "ACP"
-            if is_acp and group_steps:
-                grand_has_acp = True
             day_input = sum(step_net_input(r) for r in group_steps)
             day_output = sum(r["completion"] for r in group_steps)
             day_cached = sum(r["cached"] for r in group_steps)
@@ -190,11 +187,8 @@ def print_daily_table(steps: list[dict]) -> None:
             print(f"  {date_label:<12}  {src:<6}  {n_sessions:>8}  {day_input:>{col_w},}  {day_output:>8,}  {cached_str}  {session_ids}")
 
     print("  " + "-" * 70)
-    # Grand total cached: show --- if any ACP sessions are present (mixed).
-    if grand_has_acp:
-        cached_str = _fmt_cached(0, True)
-    else:
-        cached_str = f"{grand_cached:>{col_w},}"
+    # Grand total cached: sum known (direct) values even when ACP is present.
+    cached_str = f"{grand_cached:>{col_w},}"
     print(f"  {'TOTAL':<12}  {'':6}  {len(grand_sessions):>8}  {grand_input:>{col_w},}  {grand_output:>8,}  {cached_str}")
     print()
 
@@ -296,13 +290,10 @@ def main() -> None:
 
         total_input = sum(step_net_input(r) for r in filtered)
         total_output = sum(r["completion"] for r in filtered)
-        has_acp = any(r["is_acp"] for r in filtered)
         n_sessions = len({r["session_id"] for r in filtered})
-        if has_acp:
-            print(f"  {n_sessions} sessions  |  input: {total_input:,}  output: {total_output:,}  cached: ---")
-        else:
-            total_cached = sum(r["cached"] for r in filtered)
-            print(f"  {n_sessions} sessions  |  input: {total_input:,}  output: {total_output:,}  cached: {total_cached:,}")
+        # Sum cached from direct sessions only (ACP cached is unknown).
+        total_cached = sum(r["cached"] for r in filtered if not r["is_acp"])
+        print(f"  {n_sessions} sessions  |  input: {total_input:,}  output: {total_output:,}  cached: {total_cached:,}")
         print()
         return
 
