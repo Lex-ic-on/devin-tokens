@@ -73,6 +73,11 @@ def session_summary(data: dict) -> dict:
                 "cache_creation": tel.get("cache_creation_tokens", 0) or 0,
             })
 
+    # ACP sessions (synthetic transcripts from Hermes-via-ACP) carry an
+    # _acp_metadata field.  They report cached_tokens=0 because the ACP
+    # protocol does not expose cache token counts.
+    is_acp = "_acp_metadata" in data
+
     return {
         "session_id": data.get("session_id", ""),
         "title": title,
@@ -84,6 +89,7 @@ def session_summary(data: dict) -> dict:
         "steps_count": fm.get("total_steps", len(steps)),
         "has_step_detail": len(per_step) > 0,
         "per_step": per_step,
+        "is_acp": is_acp,
     }
 
 
@@ -121,33 +127,63 @@ def print_session_detail(s: dict) -> None:
     print()
 
 
+def _fmt_cached(n: int, is_acp: bool) -> str:
+    """Format cached tokens. ACP sessions show '---' (unknown)."""
+    if is_acp:
+        return f"{'---':>{10}}"
+    return f"{n:>10,}"
+
+
 def print_daily_table(sessions: list[dict]) -> None:
-    """Group sessions by date and print a ccusage-style daily table."""
-    by_date: dict[str, list] = defaultdict(list)
+    """Group sessions by date and source, print a ccusage-style daily table.
+
+    Each day is split into two rows: ``direct`` (normal CLI sessions) and
+    ``ACP`` (Hermes-via-ACP sessions).  ACP rows show ``---`` for cached
+    tokens because the ACP protocol does not report cache counts.
+    """
+    # Group by (date, source) where source is "direct" or "ACP".
+    by_group: dict[tuple[str, str], list] = defaultdict(list)
     for s in sessions:
         day = s["start"].astimezone().strftime("%Y-%m-%d") if s["start"] else "unknown"
-        by_date[day].append(s)
+        src = "ACP" if s.get("is_acp") else "direct"
+        by_group[(day, src)].append(s)
 
     col_w = 10  # token column width
     print()
-    print(f"  {'date':<12}  {'sessions':>8}  {'input':>{col_w}}  {'output':>8}  {'cached':>{col_w}}")
-    print("  " + "-" * 60)
+    print(f"  {'date':<12}  {'src':<6}  {'sessions':>8}  {'input':>{col_w}}  {'output':>8}  {'cached':>{col_w}}")
+    print("  " + "-" * 70)
 
     grand_input = grand_output = grand_cached = 0
-    for day in sorted(by_date):
-        day_sessions = by_date[day]
-        day_input = sum(s["input"] - s["cached"] for s in day_sessions)
-        day_output = sum(s["output"] for s in day_sessions)
-        day_cached = sum(s["cached"] for s in day_sessions)
-        grand_input += day_input
-        grand_output += day_output
-        grand_cached += day_cached
-        session_ids = ", ".join(s["session_id"] for s in day_sessions)
-        print(f"  {day:<12}  {len(day_sessions):>8}  {day_input:>{col_w},}  {day_output:>8,}  {day_cached:>{col_w},}  {session_ids}")
+    grand_has_acp = False
+    for day in sorted({d for d, _ in by_group}):
+        for src in ("direct", "ACP"):
+            key = (day, src)
+            if key not in by_group:
+                continue
+            group_sessions = by_group[key]
+            is_acp = src == "ACP"
+            if is_acp:
+                grand_has_acp = True
+            day_input = sum(s["input"] - s["cached"] for s in group_sessions)
+            day_output = sum(s["output"] for s in group_sessions)
+            day_cached = sum(s["cached"] for s in group_sessions)
+            grand_input += day_input
+            grand_output += day_output
+            # Only add cached to grand total if not ACP (ACP cached is unknown).
+            if not is_acp:
+                grand_cached += day_cached
+            cached_str = _fmt_cached(day_cached, is_acp)
+            session_ids = ", ".join(s["session_id"] for s in group_sessions)
+            print(f"  {day:<12}  {src:<6}  {len(group_sessions):>8}  {day_input:>{col_w},}  {day_output:>8,}  {cached_str}  {session_ids}")
 
-    print("  " + "-" * 60)
+    print("  " + "-" * 70)
     total_sessions = len(sessions)
-    print(f"  {'TOTAL':<12}  {total_sessions:>8}  {grand_input:>{col_w},}  {grand_output:>8,}  {grand_cached:>{col_w},}")
+    # Grand total cached: show --- if any ACP sessions are present (mixed).
+    if grand_has_acp:
+        cached_str = _fmt_cached(0, True)
+    else:
+        cached_str = f"{grand_cached:>{col_w},}"
+    print(f"  {'TOTAL':<12}  {'':6}  {total_sessions:>8}  {grand_input:>{col_w},}  {grand_output:>8,}  {cached_str}")
     print()
 
 
@@ -225,20 +261,26 @@ def main() -> None:
     # List mode: one row per session
     if args.list:
         print()
-        print(f"  {'session':<22}  {'start':<17}  {'input':>10}  {'output':>8}  {'cached':>10}  title")
-        print("  " + "-" * 100)
+        print(f"  {'session':<22}  {'src':<6}  {'start':<17}  {'input':>10}  {'output':>8}  {'cached':>10}  title")
+        print("  " + "-" * 105)
         for s in sorted(filtered, key=lambda x: x["start"]):
             has_detail = " *" if s["has_step_detail"] else "  "
             title = s["title"][:30]
             net_input = s["input"] - s["cached"]
-            print(f"  {s['session_id']:<22}{has_detail} {fmt_date(s['start']):<17}  {net_input:>10,}  {s['output']:>8,}  {s['cached']:>10,}  {title}")
+            src = "ACP" if s.get("is_acp") else "direct"
+            cached_str = _fmt_cached(s["cached"], s.get("is_acp", False))
+            print(f"  {s['session_id']:<22}{has_detail} {src:<6} {fmt_date(s['start']):<17}  {net_input:>10,}  {s['output']:>8,}  {cached_str}  {title}")
         print()
         print("  (* = per-step token data available)")
         print()
         total_input = sum(s["input"] - s["cached"] for s in filtered)
         total_output = sum(s["output"] for s in filtered)
-        total_cached = sum(s["cached"] for s in filtered)
-        print(f"  {len(filtered)} sessions  |  input: {total_input:,}  output: {total_output:,}  cached: {total_cached:,}")
+        has_acp = any(s.get("is_acp") for s in filtered)
+        if has_acp:
+            print(f"  {len(filtered)} sessions  |  input: {total_input:,}  output: {total_output:,}  cached: ---")
+        else:
+            total_cached = sum(s["cached"] for s in filtered)
+            print(f"  {len(filtered)} sessions  |  input: {total_input:,}  output: {total_output:,}  cached: {total_cached:,}")
         print()
         return
 
