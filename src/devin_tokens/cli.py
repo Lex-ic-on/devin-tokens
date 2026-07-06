@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import textwrap
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -184,7 +185,11 @@ def print_daily_table(steps: list[dict]) -> None:
             # Show date only on the first (direct) row; blank on ACP row.
             date_label = day if not is_acp else ""
             n_sessions = len({r["session_id"] for r in group_steps})
-            print(f"  {date_label:<12}  {src:<6}  {n_sessions:>8}  {day_input:>{col_w},}  {day_output:>8,}  {cached_str}  {session_ids}")
+            row_prefix = f"  {date_label:<12}  {src:<6}  {n_sessions:>8}  {day_input:>{col_w},}  {day_output:>8,}  {cached_str}  "
+            indent = " " * len(row_prefix)
+            # width is total line width (indent + session text); allow 52 chars for sessions per line.
+            wrapped = textwrap.wrap(session_ids, width=len(row_prefix) + 52, subsequent_indent=indent)
+            print(row_prefix + (("\n" + indent).join(wrapped) if wrapped else ""))
 
     print("  " + "-" * 70)
     # Grand total cached: sum known (direct) values even when ACP is present.
