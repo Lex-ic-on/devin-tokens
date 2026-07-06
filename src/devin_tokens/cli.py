@@ -187,8 +187,13 @@ def print_daily_table(steps: list[dict]) -> None:
             n_sessions = len({r["session_id"] for r in group_steps})
             row_prefix = f"  {date_label:<12}  {src:<6}  {n_sessions:>8}  {day_input:>{col_w},}  {day_output:>8,}  {cached_str}  "
             indent = " " * len(row_prefix)
-            # width is total line width (indent + session text); allow 52 chars for sessions per line.
-            wrapped = textwrap.wrap(session_ids, width=len(row_prefix) + 52, subsequent_indent=indent)
+            # Wrap only the session text to the available column width; handle
+            # indentation ourselves so continuation lines align under the first
+            # session name without being double-indented or over-stretched.
+            available = 52  # chars available for session text per line
+            wrapped = textwrap.wrap(
+                session_ids, width=available, break_on_hyphens=False
+            )
             print(row_prefix + (("\n" + indent).join(wrapped) if wrapped else ""))
 
     print("  " + "-" * 70)
